@@ -681,7 +681,20 @@ const S={
           cordB:0.30, cordH:0.50, fondParz:true, gTerreno:18,
           /* relazione */
           relTav:true},
-  selInf:null, impGenPos:{}, impPlaceSys:null
+  selInf:null, impGenPos:{}, impPlaceSys:null,
+  energia:{
+    clima:Array.from({length:12},()=>({tm:null,irr:null})),
+    tintH:20, tintC:26, ricambi:0.3, pontiTermici:10, inerzia:'media',
+    gInt:4, gFattore:0.65, ombreggio:0.9,
+    stratPar:null, stratCop:null, stratPav:null,
+    areaParEst:null, areaCop:null, areaPav:null,
+    infEst:{}, riscOn:true, raffOn:true, acsOn:true, eleOn:true,
+    vettoreH:'gas', rendH:0.85, pciH:9.59, prezzoH:0.95,
+    eerC:3.0, prezzoEle:0.28,
+    occupanti:4, litriPP:45, tRete:15, tErog:40, rendACS:0.75,
+    vettoreACS:'gas', pciACS:9.59, prezzoACS:0.95,
+    eleManual:null, elePunti:{}
+  }
 };
 function seedLib(){
   S.materiali=MAT_BASE.map(m=>({id:uid(),nome:m[0],lambda:m[1],rho:m[2],c:m[3],stato:m[4],fonte:m[4]==='rif'?'Valore di riferimento UNI EN ISO 10456':''}));
@@ -986,7 +999,8 @@ const PANES=[
  {n:'07',g:'◈',l:'3D',    t:'Modello 3D',    view:'3d'},
  {n:'08',g:'⚡',l:'Imp',   t:'Schemi impianti', view:'imp'},
  {n:'09',g:'⌗',l:'Strutt',t:'Carpenteria e calcolo', view:'str'},
- {n:'10',g:'▦',l:'Abaco', t:'Abaco superfici'}
+ {n:'10',g:'▦',l:'Abaco', t:'Abaco superfici'},
+ {n:'11',g:'♨',l:'Consumi',t:'Consumi energetici'}
 ];
 const is3D = i => !!(PANES[i]&&PANES[i].view==='3d');
 const isImp = i => !!(PANES[i]&&PANES[i].view==='imp');
@@ -1286,7 +1300,7 @@ function pane3D(){
    nessun tuo dato lascia il dispositivo. Offline, gli altri passi restano pienamente funzionanti.</div>`;
 }
 
-const PANEFN=[paneDXF,paneVani,paneQuote,paneMat,paneInf,paneComp,pane3D,paneImp,paneStr,paneAbaco];
+const PANEFN=[paneDXF,paneVani,paneQuote,paneMat,paneInf,paneComp,pane3D,paneImp,paneStr,paneAbaco,paneEne];
 function render(){
   $('#side').innerHTML=PANEFN[S.pane](); bind(); bar();
   if(is3D(S.pane)){ show3D(); } else { hide3D(); draw(); }
@@ -1393,6 +1407,56 @@ function bind(){
   if(isStr(S.pane)) bindStr();
   const ea=$('#eAbaco'); if(ea) ea.onclick=expAbaco;
   on('[data-ab]','click',e=>{ S.sel=+e.currentTarget.dataset.ab; paintRooms(); render(); });
+  bindEne();
+}
+/* ---------- binding — consumi energetici ---------- */
+function bindEne(){
+  ensureEne();
+  const eR=$('#eRisc'); if(eR) eR.onchange=()=>{S.energia.riscOn=eR.checked;render();};
+  const eRf=$('#eRaff'); if(eRf) eRf.onchange=()=>{S.energia.raffOn=eRf.checked;render();};
+  const eA=$('#eAcs'); if(eA) eA.onchange=()=>{S.energia.acsOn=eA.checked;render();};
+  const eE=$('#eEle'); if(eE) eE.onchange=()=>{S.energia.eleOn=eE.checked;render();};
+  const eSP=$('#eStratPar'); if(eSP) eSP.onchange=()=>{S.energia.stratPar=eSP.value||null;render();};
+  const eSC=$('#eStratCop'); if(eSC) eSC.onchange=()=>{S.energia.stratCop=eSC.value||null;render();};
+  const eSV=$('#eStratPav'); if(eSV) eSV.onchange=()=>{S.energia.stratPav=eSV.value||null;render();};
+  const eAP=$('#eAreaPar'); if(eAP) eAP.onchange=()=>{S.energia.areaParEst=eAP.value===''?null:+eAP.value;render();};
+  const eAC=$('#eAreaCop'); if(eAC) eAC.onchange=()=>{S.energia.areaCop=eAC.value===''?null:+eAC.value;render();};
+  const eAV=$('#eAreaPav'); if(eAV) eAV.onchange=()=>{S.energia.areaPav=eAV.value===''?null:+eAV.value;render();};
+  const ePt=$('#ePonti'); if(ePt) ePt.onchange=()=>{S.energia.pontiTermici=+ePt.value||0;render();};
+  const eRc=$('#eRic'); if(eRc) eRc.onchange=()=>{S.energia.ricambi=+eRc.value||0;render();};
+  const eIn=$('#eInerzia'); if(eIn) eIn.onchange=()=>{S.energia.inerzia=eIn.value;render();};
+  const eGi=$('#eGint'); if(eGi) eGi.onchange=()=>{S.energia.gInt=+eGi.value||0;render();};
+  const eGf=$('#eGfin'); if(eGf) eGf.onchange=()=>{S.energia.gFattore=+eGf.value||0;render();};
+  const eOm=$('#eOmb'); if(eOm) eOm.onchange=()=>{S.energia.ombreggio=+eOm.value||0;render();};
+  const eTH=$('#eTintH'); if(eTH) eTH.onchange=()=>{S.energia.tintH=+eTH.value||0;render();};
+  const eTC=$('#eTintC'); if(eTC) eTC.onchange=()=>{S.energia.tintC=+eTC.value||0;render();};
+  on('[data-eclimatm]','change',ev=>{const i=+ev.target.dataset.eclimatm;
+    S.energia.clima[i].tm=ev.target.value===''?null:+ev.target.value; render();});
+  on('[data-eclimairr]','change',ev=>{const i=+ev.target.dataset.eclimairr;
+    S.energia.clima[i].irr=ev.target.value===''?null:+ev.target.value; render();});
+  on('[data-eest]','change',ev=>{S.energia.infEst[ev.target.dataset.eest]=ev.target.checked; render();});
+  const eVH=$('#eVetH'); if(eVH) eVH.onchange=()=>{S.energia.vettoreH=eVH.value;
+    if(VETTORI[eVH.value]) S.energia.pciH=VETTORI[eVH.value].pci; render();};
+  const eRH=$('#eRendH'); if(eRH) eRH.onchange=()=>{S.energia.rendH=+eRH.value||0;render();};
+  const ePH=$('#ePciH'); if(ePH) ePH.onchange=()=>{S.energia.pciH=+ePH.value||0;render();};
+  const ePzH=$('#ePrezH'); if(ePzH) ePzH.onchange=()=>{S.energia.prezzoH=+ePzH.value||0;render();};
+  const eEr=$('#eEer'); if(eEr) eEr.onchange=()=>{S.energia.eerC=+eEr.value||0;render();};
+  const ePE=$('#ePrezEle'); if(ePE) ePE.onchange=()=>{S.energia.prezzoEle=+ePE.value||0;render();};
+  const eOc=$('#eOcc'); if(eOc) eOc.onchange=()=>{S.energia.occupanti=+eOc.value||0;render();};
+  const eLp=$('#eLpp'); if(eLp) eLp.onchange=()=>{S.energia.litriPP=+eLp.value||0;render();};
+  const eTr=$('#eTrete'); if(eTr) eTr.onchange=()=>{S.energia.tRete=+eTr.value||0;render();};
+  const eTe=$('#eTerog'); if(eTe) eTe.onchange=()=>{S.energia.tErog=+eTe.value||0;render();};
+  const eRA=$('#eRendAcs'); if(eRA) eRA.onchange=()=>{S.energia.rendACS=+eRA.value||0;render();};
+  const eVA=$('#eVetAcs'); if(eVA) eVA.onchange=()=>{S.energia.vettoreACS=eVA.value;
+    if(VETTORI[eVA.value]) S.energia.pciACS=VETTORI[eVA.value].pci; render();};
+  const ePA=$('#ePciAcs'); if(ePA) ePA.onchange=()=>{S.energia.pciACS=+ePA.value||0;render();};
+  const ePzA=$('#ePrezAcs'); if(ePzA) ePzA.onchange=()=>{S.energia.prezzoACS=+ePzA.value||0;render();};
+  on('[data-elew]','change',ev=>{const k=ev.target.dataset.elew;
+    S.energia.elePunti[k]=Object.assign({},S.energia.elePunti[k]||ELE_DEF[k],{w:+ev.target.value||0}); render();});
+  on('[data-eleh]','change',ev=>{const k=ev.target.dataset.eleh;
+    S.energia.elePunti[k]=Object.assign({},S.energia.elePunti[k]||ELE_DEF[k],{h:+ev.target.value||0}); render();});
+  const eEM=$('#eEleManual'); if(eEM) eEM.onchange=()=>{S.energia.eleManual=eEM.value===''?null:+eEM.value;render();};
+  const eCsv=$('#eEneCsv'); if(eCsv) eCsv.onclick=expEnergia;
 }
 const lv=id=>S.livelli.find(l=>l.id===id);
 const mat=id=>S.materiali.find(m=>m.id===id);
@@ -1533,7 +1597,7 @@ function expJson(){
     infissi:S.infissi.map(f=>({pi:f.pi,tipo:f.tipo,hOver:f.hOver})),
     m3d:S.m3d,impianti:S.impianti,usi:S.usi,termMode:S.termMode,termPasso:S.termPasso,termMax:S.termMax,
     impLiv:S.impLiv,layerStrat:S.layerStrat,impGenPos:S.impGenPos,
-    strutt:S.strutt,strCfg:S.strCfg},null,1),'application/json');
+    strutt:S.strutt,strCfg:S.strCfg,energia:S.energia},null,1),'application/json');
 }
 function impPrz(){
   const i=document.createElement('input'); i.type='file'; i.accept='.csv';
@@ -1689,10 +1753,11 @@ $('#fJson').onchange=e=>{
     try{
       const d=JSON.parse(String(r.result));
       ['scala','layerMap','cfg','limiti','livelli','materiali','strati','tipi','cuts','m3d','impianti','usi',
-       'termMode','termPasso','termMax','impLiv','layerStrat','impGenPos','strutt','strCfg']
+       'termMode','termPasso','termMax','impLiv','layerStrat','impGenPos','strutt','strCfg','energia']
         .forEach(k=>{ if(d[k]!==undefined) S[k]=d[k]; });
       if(!S.m3d.levelsOff) S.m3d.levelsOff={};
       if(!S.m3d.mep) S.m3d.mep='model';
+      ensureEne();
       if(S.dxf){ rebuild(); detectRooms();
         if(d.rooms) d.rooms.forEach(sr=>{
           const m=S.rooms.find(r=>Math.hypot(r.cx-sr.cx,r.cy-sr.cy)<10);
@@ -6719,6 +6784,336 @@ function expAbaco(){
     R.push([rm.nome,u,nf(A.area),nf(A.soffitto),nf(A.per),nf(A.h),nf(A.lorde),nf(A.fori),
       nf(A.nette),nf(A.vetro),nf(A.battiscopa),nf(A.tinteg),nf(A.vol)]);});
   dl('abaco-superfici-modulo.csv',csv(R));
+}
+
+/* ==================== CONSUMI ENERGETICI ====================
+   Bilancio mensile quasi stazionario (EN ISO 13790 / UNI-TS 11300-1, metodo semplificato) per
+   stimare fabbisogni e consumi. Non è un attestato di prestazione energetica: dati climatici,
+   aree disperdenti e rendimenti impiantistici vanno inseriti dall'utente, come per i limiti U
+   e i gradi giorno — non si precaricano perché sbagliarli invaliderebbe il calcolo in silenzio. */
+const MESI=[['Gennaio',31],['Febbraio',28],['Marzo',31],['Aprile',30],['Maggio',31],['Giugno',30],
+  ['Luglio',31],['Agosto',31],['Settembre',30],['Ottobre',31],['Novembre',30],['Dicembre',31]];
+const INERZIA={molto_leggera:{l:'Molto leggera',cm:45},leggera:{l:'Leggera',cm:80},
+  media:{l:'Media',cm:130},pesante:{l:'Pesante',cm:260},molto_pesante:{l:'Molto pesante',cm:370}};
+const VETTORI={gas:{l:'Gas metano',um:'Sm³',pci:9.59},gasolio:{l:'Gasolio',um:'l',pci:9.9},
+  gpl:{l:'GPL',um:'l',pci:6.6},pellet:{l:'Pellet',um:'kg',pci:4.6},legna:{l:'Legna da ardere',um:'kg',pci:3.6},
+  elettrico:{l:'Elettrico (resistenza o pompa di calore)',um:'kWh',pci:1}};
+const ELE_KIND=['luce','faretto','presa','fm'];
+const ELE_DEF={luce:{w:8,h:700},faretto:{w:6,h:500},presa:{w:60,h:250},fm:{w:500,h:150}};
+
+function ensureEne(){
+  if(!S.energia) S.energia={clima:MESI.map(()=>({tm:null,irr:null})),tintH:20,tintC:26,ricambi:0.3,
+    pontiTermici:10,inerzia:'media',gInt:4,gFattore:0.65,ombreggio:0.9,stratPar:null,stratCop:null,
+    stratPav:null,areaParEst:null,areaCop:null,areaPav:null,infEst:{},riscOn:true,raffOn:true,acsOn:true,
+    eleOn:true,vettoreH:'gas',rendH:0.85,pciH:9.59,prezzoH:0.95,eerC:3.0,prezzoEle:0.28,occupanti:4,
+    litriPP:45,tRete:15,tErog:40,rendACS:0.75,vettoreACS:'gas',pciACS:9.59,prezzoACS:0.95,
+    eleManual:null,elePunti:{}};
+  const e=S.energia;
+  if(!e.clima||e.clima.length!==12) e.clima=MESI.map(()=>({tm:null,irr:null}));
+  if(!e.infEst) e.infEst={};
+  if(!e.elePunti) e.elePunti={};
+}
+
+/* ---- involucro ---- */
+function areaCopAuto(){
+  if(!S.livelli.length) return 0;
+  const top=S.livelli.reduce((a,b)=>(+b.quota>+a.quota?b:a));
+  return S.rooms.filter(r=>r.liv===top.id).reduce((a,r)=>a+r.area,0);
+}
+function areaPavAuto(){
+  if(!S.livelli.length) return 0;
+  const bot=S.livelli.reduce((a,b)=>(+b.quota<+a.quota?b:a));
+  return S.rooms.filter(r=>r.liv===bot.id).reduce((a,r)=>a+r.area,0);
+}
+function uOfStrat(id){ const st=S.strati.find(s=>s.id===id); if(!st) return null;
+  const c=stratCalc(st); return (c&&!c.manca)?c.U:null; }
+function infEstGroups(){
+  const map=new Map();
+  S.infissi.forEach(f=>{
+    const key=f.tipo?('t'+f.tipo):('k'+f.kind), t=tipoOf(f);
+    let g=map.get(key);
+    if(!g){ g={key,kind:f.kind,tipo:t,n:0,area:0,UA:0,uNote:false}; map.set(key,g); }
+    const a=infW(f)*infH(f), u=t?uwOf(t):null;
+    g.n++; g.area+=a; if(u!=null) g.UA+=u*a; else g.uNote=true;
+  });
+  return [...map.values()];
+}
+function estFlag(g){ const v=S.energia.infEst[g.key]; return v===undefined?(g.kind==='fin'):v; }
+function finPorEstTot(){
+  let area=0,UA=0;
+  infEstGroups().forEach(g=>{ if(!estFlag(g)) return; area+=g.area; UA+=g.UA; });
+  return {area,UA};
+}
+function involucro(){
+  const e=S.energia;
+  const uPar=uOfStrat(e.stratPar), uCop=uOfStrat(e.stratCop), uPav=uOfStrat(e.stratPav);
+  const aPar=+e.areaParEst||0;
+  const aCop=(e.areaCop!=null&&e.areaCop!=='')?+e.areaCop:areaCopAuto();
+  const aPav=(e.areaPav!=null&&e.areaPav!=='')?+e.areaPav:areaPavAuto();
+  const fin=finPorEstTot();
+  const UA_par=uPar!=null?uPar*aPar:0, UA_cop=uCop!=null?uCop*aCop:0, UA_pav=uPav!=null?uPav*aPav:0;
+  const Htr0=UA_par+UA_cop+UA_pav+fin.UA;
+  const Htr=Htr0*(1+(+e.pontiTermici||0)/100);
+  const Vtot=S.rooms.reduce((a,r)=>a+volume(r),0);
+  const Af=S.rooms.filter(r=>r.tipo!=='ac').reduce((a,r)=>a+r.area,0);
+  const Hve=0.34*(+e.ricambi||0)*Vtot;
+  return {uPar,uCop,uPav,aPar,aCop,aPav,fin,UA_par,UA_cop,UA_pav,Htr0,Htr,Vtot,Af,Hve,Htot:Htr+Hve};
+}
+
+/* ---- bilancio mensile: riscaldamento con fattore di utilizzazione EN ISO 13790,
+   raffrescamento con bilancio netto semplificato (senza fattore di utilizzazione delle dispersioni,
+   che richiederebbe un modello orario) ---- */
+function bilancioMensile(){
+  const e=S.energia, inv=involucro();
+  const a0=1, tau0=15;
+  const Cm=(INERZIA[e.inerzia]||INERZIA.media).cm*1000*inv.Af;
+  const tau=inv.Htot>0? Cm/inv.Htot/3600 : 0;
+  const a=a0+tau/tau0;
+  const rows=e.clima.map((c,i)=>{
+    const giorni=MESI[i][1], mese=MESI[i][0];
+    const tm=(c.tm===null||c.tm===undefined||c.tm==='')?null:+c.tm;
+    const irr=(c.irr===null||c.irr===undefined||c.irr==='')?0:+c.irr;
+    if(tm==null) return {mese,giorni,tm:null,Qsol:0,Qint:0,Qgn:0,QHht:0,etaH:0,QHnd:0,QCnd:0};
+    const Qint=(+e.gInt||0)*inv.Af*24*giorni/1000;
+    const Qsol=inv.fin.area*(+e.gFattore||0)*(+e.ombreggio||1)*irr*giorni;
+    const Qgn=Qint+Qsol;
+    let QHht=0,etaH=0,QHnd=0;
+    if(e.riscOn && tm<e.tintH){
+      QHht=inv.Htot*(e.tintH-tm)*24*giorni/1000;
+      const g=QHht>0?Qgn/QHht:0;
+      etaH = g<=0 ? 1 : (Math.abs(g-1)<1e-6 ? a/(a+1) : (1-Math.pow(g,a))/(1-Math.pow(g,a+1)));
+      QHnd=Math.max(0,QHht-etaH*Qgn);
+    }
+    let QCnd=0;
+    if(e.raffOn){
+      const Ttr=inv.Htot*(e.tintC-tm)*24*giorni/1000;
+      QCnd=Math.max(0,Qgn-Ttr);
+    }
+    return {mese,giorni,tm,Qsol,Qint,Qgn,QHht,etaH,QHnd,QCnd};
+  });
+  const QHnd=rows.reduce((s,r)=>s+r.QHnd,0), QCnd=rows.reduce((s,r)=>s+r.QCnd,0);
+  return {rows,inv,tau,a,QHnd,QCnd};
+}
+function bilancioACS(){
+  const e=S.energia;
+  const Vw=(+e.occupanti||0)*(+e.litriPP||0);
+  const Qacs=Vw*365*1.163*Math.max(0,(+e.tErog||0)-(+e.tRete||0))/1000;
+  const cons=e.rendACS>0? Qacs/e.rendACS : 0;
+  return {Vw,Qacs,cons};
+}
+function bilancioEle(){
+  const e=S.energia;
+  if(e.eleManual!=null && e.eleManual!=='') return {kWh:+e.eleManual,daImpianti:false,det:[]};
+  const dev=S.impianti&&S.impianti.elettrico?S.impianti.elettrico.dev:[];
+  let kWh=0; const det=[];
+  ELE_KIND.forEach(k=>{
+    const n=dev.filter(d=>d.kind===k).length;
+    const p=e.elePunti[k]||ELE_DEF[k];
+    const kwh=n*p.w*p.h/1000;
+    kWh+=kwh; det.push({k,n,w:p.w,h:p.h,kwh});
+  });
+  return {kWh,daImpianti:true,det};
+}
+function riepilogoEnergia(){
+  const e=S.energia, bil=bilancioMensile(), acs=bilancioACS(), ele=bilancioEle();
+  const out={bil,acs,ele};
+  if(e.riscOn){
+    const vh=VETTORI[e.vettoreH]||VETTORI.gas;
+    const Efin = e.rendH>0? bil.QHnd/e.rendH : 0;
+    const pci = e.vettoreH==='elettrico'?1:(+e.pciH||vh.pci);
+    const qta = pci>0? Efin/pci : 0;
+    out.risc={Efin,qta,costo:qta*(+e.prezzoH||0)};
+  }
+  if(e.raffOn){
+    const Eele = e.eerC>0? bil.QCnd/e.eerC : 0;
+    out.raff={Eele,costo:Eele*(+e.prezzoEle||0)};
+  }
+  if(e.acsOn){
+    const vh=VETTORI[e.vettoreACS]||VETTORI.gas, isEle=e.vettoreACS==='elettrico';
+    const pci=isEle?1:(+e.pciACS||vh.pci);
+    const qta=pci>0?acs.cons/pci:0;
+    out.acsRes={qta,costo: isEle? acs.cons*(+e.prezzoEle||0) : qta*(+e.prezzoACS||0)};
+  }
+  if(e.eleOn) out.eleRes={costo: ele.kWh*(+e.prezzoEle||0)};
+  let totKwh=0, totCosto=0;
+  if(e.riscOn){ totKwh+=out.risc.Efin; totCosto+=out.risc.costo; }
+  if(e.raffOn){ totKwh+=out.raff.Eele; totCosto+=out.raff.costo; }
+  if(e.acsOn){ totKwh+=acs.cons; totCosto+=out.acsRes.costo; }
+  if(e.eleOn){ totKwh+=ele.kWh; totCosto+=out.eleRes.costo; }
+  out.totKwh=totKwh; out.totCosto=totCosto;
+  return out;
+}
+
+function paneEne(){
+  ensureEne();
+  const e=S.energia, R=riepilogoEnergia(), inv=R.bil.inv;
+  const stratOpt=(list,cur)=>`<option value="">— nessuna —</option>`+
+    list.map(s=>`<option value="${s.id}"${cur===s.id?' selected':''}>${esc(s.nome)}</option>`).join('');
+  const parList=S.strati.filter(s=>s.tipo==='parete_est');
+  const copList=S.strati.filter(s=>s.tipo==='copertura'||s.tipo==='solaio_sup');
+  const pavList=S.strati.filter(s=>s.tipo==='pavimento');
+  const ncols=1+(e.riscOn?3:0)+(e.raffOn?1:0);
+  const umH=(VETTORI[e.vettoreH]||{}).um||'', umA=(VETTORI[e.vettoreACS]||{}).um||'';
+  return head(10,'Bilancio energetico mensile semplificato (EN ISO 13790 / UNI-TS 11300-1) per stimare i consumi di riscaldamento, raffrescamento, ACS ed elettrico a partire dai dati già censiti nei passi precedenti.')+
+  `<div class="sec"><h3>Usi da calcolare</h3>
+   <label class="chk"><input type="checkbox" id="eRisc"${e.riscOn?' checked':''}> Riscaldamento</label>
+   <label class="chk"><input type="checkbox" id="eRaff"${e.raffOn?' checked':''}> Raffrescamento</label>
+   <label class="chk"><input type="checkbox" id="eAcs"${e.acsOn?' checked':''}> Acqua calda sanitaria</label>
+   <label class="chk"><input type="checkbox" id="eEle"${e.eleOn?' checked':''}> Elettrico (illuminazione/prese)</label></div>
+
+  <div class="sec"><h3>Involucro</h3>
+   <label class="f"><span>Stratigrafia parete esterna</span><select id="eStratPar">${stratOpt(parList,e.stratPar)}</select></label>
+   <label class="f"><span>Superficie disperdente parete esterna, netta di porte/finestre (m²)</span>
+    <input type="number" step="0.1" id="eAreaPar" value="${e.areaParEst??''}" placeholder="inserisci — vedi nota"></label>
+   <div class="note">Non ancora calcolata in automatico: il rilievo non distingue le pareti verso l'esterno
+    da quelle interne. Ricavala dall'<b>Abaco superfici</b> (passo 10) o dal computo delle pareti perimetrali.</div>
+   <label class="f" style="margin-top:8px"><span>Stratigrafia copertura</span><select id="eStratCop">${stratOpt(copList,e.stratCop)}</select></label>
+   <label class="f"><span>Superficie di copertura (m²)</span>
+    <input type="number" step="0.1" id="eAreaCop" value="${e.areaCop??''}" placeholder="${nf(areaCopAuto())} (auto, piano più alto)"></label>
+   <label class="f" style="margin-top:8px"><span>Stratigrafia pavimento contro terra</span><select id="eStratPav">${stratOpt(pavList,e.stratPav)}</select></label>
+   <label class="f"><span>Superficie contro terra (m²)</span>
+    <input type="number" step="0.1" id="eAreaPav" value="${e.areaPav??''}" placeholder="${nf(areaPavAuto())} (auto, piano più basso)"></label>
+   <div class="row" style="margin-top:8px">
+    <label class="f" style="flex:1"><span>Maggiorazione ponti termici (%)</span><input type="number" step="1" id="ePonti" value="${e.pontiTermici}"></label>
+    <label class="f" style="flex:1"><span>Ricambi d'aria (vol/h)</span><input type="number" step="0.05" id="eRic" value="${e.ricambi}"></label></div>
+   <label class="f"><span>Classe di inerzia termica</span><select id="eInerzia">
+    ${Object.keys(INERZIA).map(k=>`<option value="${k}"${e.inerzia===k?' selected':''}>${INERZIA[k].l}</option>`).join('')}</select></label>
+   <div class="kv"><span>H trasmissione (con ponti termici)</span><b>${nf(inv.Htr,1)} W/K</b></div>
+   <div class="kv"><span>H ventilazione</span><b>${nf(inv.Hve,1)} W/K</b></div>
+   <div class="kv"><span>Superficie utile risc./raffr.</span><b>${nf(inv.Af,1)} m²</b></div>
+   <div class="kv"><span>Volume netto</span><b>${nf(inv.Vtot,1)} m³</b></div>
+   ${(!e.areaParEst||inv.uPar==null)?`<div class="note er">Manca la stratigrafia o la superficie della parete esterna: le dispersioni per trasmissione sono sottostimate.</div>`:''}</div>
+
+  <div class="sec"><h3>Infissi disperdenti</h3>
+   <p class="pd" style="margin:0 0 6px">Segna quali tipi di infisso danno sull'esterno. Le finestre partono spuntate, le porte no: correggi se serve.</p>
+   <table><thead><tr><th>Tipo</th><th style="width:24px">N.</th><th style="width:50px">m²</th><th style="width:26px">Est.</th></tr></thead><tbody>
+   ${infEstGroups().map(g=>`<tr><td>${g.tipo?esc(g.tipo.nome):(g.kind==='fin'?'Finestre senza tipo':'Porte senza tipo')}
+     ${g.uNote?'<div style="font-size:10px;color:var(--mut2)">Uw mancante su alcuni</div>':''}</td>
+    <td class="n">${g.n}</td><td class="n">${nf(g.area,1)}</td>
+    <td style="text-align:center"><input type="checkbox" data-eest="${g.key}"${estFlag(g)?' checked':''}></td></tr>`).join('')||'<tr><td colspan="4">Nessun infisso rilevato.</td></tr>'}
+   </tbody></table>
+   <div class="kv" style="margin-top:6px"><span>Superficie infissi esterni</span><b>${nf(inv.fin.area,1)} m²</b></div>
+   <div class="kv"><span>U·A infissi esterni</span><b>${nf(inv.fin.UA,2)} W/K</b></div></div>
+
+  <div class="sec"><h3>Apporti gratuiti</h3>
+   <div class="row"><label class="f" style="flex:1"><span>Apporti interni (W/m²)</span><input type="number" step="0.5" id="eGint" value="${e.gInt}"></label>
+    <label class="f" style="flex:1"><span>Fattore solare medio vetri g</span><input type="number" step="0.01" id="eGfin" value="${e.gFattore}"></label></div>
+   <label class="f"><span>Fattore correttivo telaio × ombreggiamento (Ff·Fs)</span><input type="number" step="0.01" id="eOmb" value="${e.ombreggio}"></label>
+   <div class="note">Apporti interni: default 4 W/m² (residenziale, UNI/TS 11300-1). Il fattore solare g è quello
+    del vetro (dalla scheda tecnica); Ff·Fs riduce per telaio e ombreggiamenti — 1 = nessuna riduzione.</div></div>
+
+  <div class="sec"><h3>Temperature di regolazione</h3>
+   <div class="row"><label class="f" style="flex:1"><span>Riscaldamento (°C)</span><input type="number" step="0.5" id="eTintH" value="${e.tintH}"></label>
+    ${e.raffOn?`<label class="f" style="flex:1"><span>Raffrescamento (°C)</span><input type="number" step="0.5" id="eTintC" value="${e.tintC}"></label>`:''}</div></div>
+
+  <div class="sec"><h3>Dati climatici mensili</h3>
+   <p class="pd" style="margin:0 0 6px">Temperatura media mensile esterna e irradiazione solare media giornaliera
+    sulle superfici vetrate (da UNI 10349 per il comune, o PVGIS). Mese vuoto = escluso dal bilancio.</p>
+   <table><thead><tr><th>Mese</th><th style="width:34px">gg</th><th style="width:60px">θe °C</th><th style="width:74px">Irr. kWh/m²gg</th></tr></thead><tbody>
+   ${MESI.map((mm,i)=>`<tr><td>${mm[0]}</td><td class="n">${mm[1]}</td>
+    <td><input type="number" step="0.1" data-eclimatm="${i}" value="${e.clima[i].tm??''}"></td>
+    <td><input type="number" step="0.1" data-eclimairr="${i}" value="${e.clima[i].irr??''}"></td></tr>`).join('')}
+   </tbody></table></div>
+
+  <div class="sec"><h3>Bilancio mensile</h3>
+   <table><thead><tr><th>Mese</th><th>Apporti kWh</th>${e.riscOn?'<th>Persi kWh</th><th>η</th><th>Risc. kWh</th>':''}${e.raffOn?'<th>Raffr. kWh</th>':''}</tr></thead><tbody>
+   ${R.bil.rows.map(r=>r.tm==null?`<tr><td>${r.mese}</td><td colspan="${ncols}" style="color:var(--mut)">n.d.</td></tr>`:
+     `<tr><td>${r.mese}</td><td class="n">${nf(r.Qgn,0)}</td>
+      ${e.riscOn?`<td class="n">${nf(r.QHht,0)}</td><td class="n">${nf(r.etaH,2)}</td><td class="n">${nf(r.QHnd,0)}</td>`:''}
+      ${e.raffOn?`<td class="n">${nf(r.QCnd,0)}</td>`:''}</tr>`).join('')}
+   </tbody></table>
+   <div class="kv" style="margin-top:6px"><span>Costante di tempo edificio τ</span><b>${nf(R.bil.tau,0)} h</b></div>
+   ${e.riscOn?`<div class="kv"><span>Fabbisogno annuo riscaldamento Q<sub>H,nd</sub></span><b style="color:var(--amb)">${nf(R.bil.QHnd,0)} kWh (${nf(inv.Af>0?R.bil.QHnd/inv.Af:0,1)} kWh/m²anno)</b></div>`:''}
+   ${e.raffOn?`<div class="kv"><span>Fabbisogno annuo raffrescamento Q<sub>C,nd</sub></span><b style="color:var(--amb)">${nf(R.bil.QCnd,0)} kWh (${nf(inv.Af>0?R.bil.QCnd/inv.Af:0,1)} kWh/m²anno)</b></div>`:''}
+   <div class="note">Riscaldamento: fattore di utilizzazione degli apporti secondo EN ISO 13790 (metodo mensile).
+    Raffrescamento: bilancio netto mensile semplificato, senza fattore di utilizzazione delle dispersioni —
+    il metodo completo UNI/TS 11300-1 per il raffrescamento richiede un modello orario.</div></div>
+
+  ${e.riscOn?`<div class="sec"><h3>Impianto di riscaldamento</h3>
+   <label class="f"><span>Vettore energetico</span><select id="eVetH">
+    ${Object.keys(VETTORI).map(k=>`<option value="${k}"${e.vettoreH===k?' selected':''}>${VETTORI[k].l}</option>`).join('')}</select></label>
+   <div class="row"><label class="f" style="flex:1"><span>Rendimento globale medio stagionale η<sub>H</sub> (o COP/SCOP)</span>
+    <input type="number" step="0.01" id="eRendH" value="${e.rendH}"></label>
+    ${e.vettoreH!=='elettrico'?`<label class="f" style="flex:1"><span>PCI (kWh/${umH})</span><input type="number" step="0.01" id="ePciH" value="${e.pciH}"></label>`:''}</div>
+   <label class="f"><span>Prezzo unitario (€/${umH||'kWh'})</span><input type="number" step="0.01" id="ePrezH" value="${e.prezzoH}"></label>
+   <div class="kv"><span>Energia finale</span><b>${nf(R.risc.Efin,0)} kWh/anno</b></div>
+   <div class="kv"><span>Consumo</span><b style="color:var(--amb)">${nf(R.risc.qta,1)} ${umH}/anno</b></div>
+   <div class="kv"><span>Costo stimato</span><b>${nf(R.risc.costo,0)} €/anno</b></div></div>`:''}
+
+  ${e.raffOn?`<div class="sec"><h3>Raffrescamento</h3>
+   <div class="row"><label class="f" style="flex:1"><span>EER medio stagionale</span><input type="number" step="0.1" id="eEer" value="${e.eerC}"></label>
+    <label class="f" style="flex:1"><span>Prezzo elettrico (€/kWh)</span><input type="number" step="0.01" id="ePrezEle" value="${e.prezzoEle}"></label></div>
+   <div class="kv"><span>Energia elettrica</span><b>${nf(R.raff.Eele,0)} kWh/anno</b></div>
+   <div class="kv"><span>Costo stimato</span><b>${nf(R.raff.costo,0)} €/anno</b></div></div>`:''}
+
+  ${e.acsOn?`<div class="sec"><h3>Acqua calda sanitaria</h3>
+   <div class="row"><label class="f" style="flex:1"><span>Occupanti</span><input type="number" step="1" id="eOcc" value="${e.occupanti}"></label>
+    <label class="f" style="flex:1"><span>Litri/persona·giorno a 40°C</span><input type="number" step="1" id="eLpp" value="${e.litriPP}"></label></div>
+   <div class="row"><label class="f" style="flex:1"><span>Temp. acqua di rete (°C)</span><input type="number" step="1" id="eTrete" value="${e.tRete}"></label>
+    <label class="f" style="flex:1"><span>Temp. erogazione (°C)</span><input type="number" step="1" id="eTerog" value="${e.tErog}"></label></div>
+   <label class="f"><span>Rendimento medio produzione + distribuzione ACS</span><input type="number" step="0.01" id="eRendAcs" value="${e.rendACS}"></label>
+   <label class="f"><span>Vettore ACS</span><select id="eVetAcs">
+    ${Object.keys(VETTORI).map(k=>`<option value="${k}"${e.vettoreACS===k?' selected':''}>${VETTORI[k].l}</option>`).join('')}</select></label>
+   ${e.vettoreACS!=='elettrico'?`<div class="row"><label class="f" style="flex:1"><span>PCI (kWh/${umA})</span><input type="number" step="0.01" id="ePciAcs" value="${e.pciACS}"></label>
+    <label class="f" style="flex:1"><span>Prezzo unitario (€/${umA})</span><input type="number" step="0.01" id="ePrezAcs" value="${e.prezzoACS}"></label></div>`:''}
+   <div class="kv"><span>Fabbisogno ACS</span><b>${nf(R.acs.Qacs,0)} kWh/anno</b></div>
+   <div class="kv"><span>Consumo</span><b style="color:var(--amb)">${nf(R.acsRes.qta,1)} ${umA}/anno</b></div>
+   <div class="kv"><span>Costo stimato</span><b>${nf(R.acsRes.costo,0)} €/anno</b></div></div>`:''}
+
+  ${e.eleOn?`<div class="sec"><h3>Elettrico — illuminazione e prese</h3>
+   ${R.ele.daImpianti?`<table><thead><tr><th>Punto</th><th style="width:32px">N.</th><th style="width:46px">W</th><th style="width:56px">h/anno</th><th style="width:56px">kWh</th></tr></thead><tbody>
+    ${R.ele.det.map(d=>`<tr><td>${IMPK[d.k]?IMPK[d.k].l:d.k}</td><td class="n">${d.n}</td>
+     <td><input type="number" step="1" data-elew="${d.k}" value="${d.w}"></td>
+     <td><input type="number" step="10" data-eleh="${d.k}" value="${d.h}"></td>
+     <td class="n">${nf(d.kwh,0)}</td></tr>`).join('')}
+    </tbody></table>
+    <div class="note">Potenza e ore equivalenti sono valori indicativi: personalizzali. I punti contati arrivano dallo schema impianti (passo 08).</div>`:
+    `<div class="note er">Nessuno schema impianti generato (passo 08): inserisci il consumo elettrico direttamente.</div>`}
+   <label class="f" style="margin-top:8px"><span>Oppure inserisci il consumo elettrico diretto (kWh/anno) — sovrascrive il calcolo per punti</span>
+    <input type="number" step="10" id="eEleManual" value="${e.eleManual??''}" placeholder="da schema impianti"></label>
+   <div class="kv"><span>Consumo elettrico utenze</span><b style="color:var(--amb)">${nf(R.ele.kWh,0)} kWh/anno</b></div>
+   <div class="kv"><span>Costo stimato</span><b>${nf(R.eleRes.costo,0)} €/anno</b></div></div>`:''}
+
+  <div class="sec"><h3>Riepilogo</h3>
+   <div class="kv"><span>Energia finale totale</span><b>${nf(R.totKwh,0)} kWh/anno</b></div>
+   <div class="kv"><span>Costo annuo stimato</span><b style="color:var(--amb)">${nf(R.totCosto,0)} €/anno</b></div>
+   <button class="btn w cy" id="eEneCsv" style="margin-top:8px">Esporta bilancio energetico — CSV</button></div>
+
+  <div class="note">Metodo: bilancio mensile quasi stazionario (EN ISO 13790 / UNI-TS 11300-1) per il riscaldamento;
+   stima semplificata per il raffrescamento. Ponti termici come maggiorazione percentuale, non da calcolo puntuale
+   (serve UNI EN ISO 14683). Irradiazione solare non distinta per orientamento. Non genera un attestato di
+   prestazione energetica (APE) né una classe energetica: stima i consumi, non sostituisce la relazione
+   ex Legge 10 né una diagnosi energetica.</div>`;
+}
+function expEnergia(){
+  const e=S.energia, R=riepilogoEnergia();
+  const rr=[['Mese','Giorni','Theta e (C)','Apporti kWh','Perdite risc. kWh','eta H','Fabbisogno risc. kWh','Fabbisogno raffr. kWh']];
+  R.bil.rows.forEach(r=>rr.push([r.mese,r.giorni,r.tm==null?'':nf(r.tm,1),nf(r.Qgn,1),nf(r.QHht,1),nf(r.etaH,3),nf(r.QHnd,1),nf(r.QCnd,1)]));
+  rr.push([]);
+  rr.push(['H trasmissione W/K',nf(R.bil.inv.Htr,1)]);
+  rr.push(['H ventilazione W/K',nf(R.bil.inv.Hve,1)]);
+  rr.push(['Superficie utile m2',nf(R.bil.inv.Af,1)]);
+  if(e.riscOn){ rr.push([]); rr.push(['RISCALDAMENTO']);
+    rr.push(['Fabbisogno annuo kWh',nf(R.bil.QHnd,0)]);
+    rr.push(['Vettore',(VETTORI[e.vettoreH]||{}).l]);
+    rr.push(['Consumo',nf(R.risc.qta,1)+' '+(VETTORI[e.vettoreH]||{}).um]);
+    rr.push(['Costo stimato €/anno',nf(R.risc.costo,0)]); }
+  if(e.raffOn){ rr.push([]); rr.push(['RAFFRESCAMENTO']);
+    rr.push(['Fabbisogno annuo kWh',nf(R.bil.QCnd,0)]);
+    rr.push(['Energia elettrica kWh',nf(R.raff.Eele,0)]);
+    rr.push(['Costo stimato €/anno',nf(R.raff.costo,0)]); }
+  if(e.acsOn){ rr.push([]); rr.push(['ACS']);
+    rr.push(['Fabbisogno annuo kWh',nf(R.acs.Qacs,0)]);
+    rr.push(['Consumo',nf(R.acsRes.qta,1)+' '+(VETTORI[e.vettoreACS]||{}).um]);
+    rr.push(['Costo stimato €/anno',nf(R.acsRes.costo,0)]); }
+  if(e.eleOn){ rr.push([]); rr.push(['ELETTRICO UTENZE']);
+    rr.push(['Consumo kWh/anno',nf(R.ele.kWh,0)]);
+    rr.push(['Costo stimato €/anno',nf(R.eleRes.costo,0)]); }
+  rr.push([]); rr.push(['Totale energia finale kWh/anno',nf(R.totKwh,0)]);
+  rr.push(['Totale costo stimato €/anno',nf(R.totCosto,0)]);
+  rr.push([]); rr.push(['Metodo','Bilancio mensile quasi stazionario EN ISO 13790 / UNI-TS 11300-1 per il riscaldamento; stima semplificata per il raffrescamento.']);
+  rr.push(['Esclusioni','Ponti termici come maggiorazione percentuale. Nessuna APE o classe energetica. Non sostituisce diagnosi energetica o relazione Legge 10.']);
+  dl('bilancio-energetico.csv',csv(rr));
 }
 
 /* ---------- pianta di prova ----------
